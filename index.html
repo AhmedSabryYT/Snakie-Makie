@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Snakie Makie PRO</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { margin: 0; background: #0b0b0b; color: #00ffcc; font-family: 'Courier New', monospace; overflow: hidden; touch-action: none; }
+        canvas { display: block; }
+        .ui-layer { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+        .menu, .pop-up { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; pointer-events: auto; text-align: center; }
+        input, button { background: #111; border: 2px solid #00ffcc; color: #00ffcc; padding: 12px; margin: 5px; border-radius: 8px; pointer-events: auto; }
+        button { background: #00ffcc; color: #000; font-weight: bold; cursor: pointer; }
+        #chat-box { position: fixed; bottom: 10px; left: 10px; width: 200px; pointer-events: auto; }
+        #messages { height: 100px; overflow-y: auto; font-size: 12px; background: rgba(0,0,0,0.5); margin-bottom: 5px; text-align: left; padding: 5px; }
+        #leaderboard { position: fixed; top: 10px; right: 10px; background: rgba(0,0,0,0.7); padding: 10px; border: 1px solid #00ffcc; font-size: 14px; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div id="menu" class="menu">
+    <h1 style="font-size: 40px; margin: 0;">SNAKIE MAKIE</h1>
+    <p>ID: <b id="display-id">...</b></p>
+    <input type="text" id="join-id" placeholder="Friend's ID">
+    <button onclick="startJoin()">JOIN REVENGE</button>
+</div>
+
+<div id="game-over" class="pop-up hidden">
+    <h1 id="status-msg">ELIMINATED</h1>
+    <button onclick="requestRevenge()">REVENGE</button>
+    <button onclick="location.reload()">MENU</button>
+</div>
+
+<div id="leaderboard">YOU: 0 | THEM: 0</div>
+
+<div id="chat-box">
+    <div id="messages"></div>
+    <input type="text" id="chat-input" placeholder="Say hi..." onkeypress="if(event.key==='Enter') sendChat()">
+</div>
+
+<canvas id="c"></canvas>
+
+<script>
+    const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
+    let peer = new Peer(), conn, isPlaying = false, angle = 0;
+    let mySnake = [], otherSnake = [], fruit = {x: 100, y: 100};
+    let myScore = 0, enemyScore = 0, isDead = false;
+
+    peer.on('open', id => { document.getElementById('display-id').innerText = id; });
+    peer.on('connection', c => { conn = c; setupConn(); start(); });
+
+    function startJoin() {
+        conn = peer.connect(document.getElementById('join-id').value);
+        setupConn(); start();
+    }
+
+    function setupConn() {
+        conn.on('data', data => {
+            if(data.type === 'move') otherSnake = data.body;
+            if(data.type === 'fruit') fruit = data.pos;
+            if(data.type === 'chat') addMsg("Them: " + data.txt);
+            if(data.type === 'dead') win();
+            if(data.type === 'revenge') location.reload();
+        });
+    }
+
+    function start() {
+        isPlaying = true; isDead = false;
+        mySnake = Array(15).fill({x: 200, y: 200});
+        document.getElementById('menu').classList.add('hidden');
+        document.getElementById('game-over').classList.add('hidden');
+    }
+
+    function sendChat() {
+        const inp = document.getElementById('chat-input');
+        if(!inp.value) return;
+        addMsg("You: " + inp.value);
+        if(conn) conn.send({type: 'chat', txt: inp.value});
+        inp.value = '';
+    }
+
+    function addMsg(t) {
+        const m = document.getElementById('messages');
+        m.innerHTML += `<div>${t}</div>`;
+        m.scrollTop = m.scrollHeight;
+    }
+
+    function requestRevenge() { if(conn) conn.send({type: 'revenge'}); location.reload(); }
+
+    function die() {
+        isDead = true; isPlaying = false;
+        document.getElementById('status-msg').innerText = "ELIMINATED";
+        document.getElementById('game-over').classList.remove('hidden');
+        if(conn) conn.send({type: 'dead'});
+    }
+
+    function win() {
+        isPlaying = false;
+        document.getElementById('status-msg').innerText = "YOU WON!";
+        document.getElementById('game-over').classList.remove('hidden');
+        myScore++; updateLB();
+    }
+
+    function updateLB() { document.getElementById('leaderboard').innerText = `YOU: ${myScore} | THEM: ${enemyScore}`; }
+
+    window.addEventListener('touchmove', e => {
+        const t = e.touches[0];
+        angle = Math.atan2(t.clientY - window.innerHeight/2, t.clientX - window.innerWidth/2);
+    });
+
+    function loop() {
+        canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+        ctx.fillStyle = '#0b0b0b'; ctx.fillRect(0,0,canvas.width,canvas.height);
+
+        // Draw Grid
+        ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
+        for(let i=0; i<canvas.width; i+=40) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,canvas.height); ctx.stroke(); }
+        for(let i=0; i<canvas.height; i+=40) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(canvas.width,i); ctx.stroke(); }
+
+        if(isPlaying) {
+            // Slower Movement
+            const head = { x: mySnake[0].x + Math.cos(angle)*3, y: mySnake[0].y + Math.sin(angle)*3 };
+            
+            // Bounds/Death Zone Check
+            if(head.x < 0 || head.x > canvas.width || head.y < 0 || head.y > canvas.height) die();
+
+            // Self Collision
+            mySnake.forEach((seg, i) => { if(i>5 && Math.hypot(head.x-seg.x, head.y-seg.y) < 10) die(); });
+
+            mySnake.unshift(head);
+            if(Math.hypot(head.x - fruit.x, head.y - fruit.y) < 20) {
+                fruit = {x: Math.random()*canvas.width, y: Math.random()*canvas.height};
+                if(conn) conn.send({type: 'fruit', pos: fruit});
+            } else { mySnake.pop(); }
+
+            if(conn && conn.open) conn.send({type: 'move', body: mySnake});
+
+            // Draw Fruit
+            ctx.fillStyle = '#ff0055'; ctx.beginPath(); ctx.arc(fruit.x, fruit.y, 8, 0, Math.PI*2); ctx.fill();
+
+            // Draw Snakes
+            ctx.lineWidth = 15; ctx.lineCap = 'round';
+            ctx.strokeStyle = '#ff0055'; ctx.beginPath(); otherSnake.forEach(p => ctx.lineTo(p.x, p.y)); ctx.stroke();
+            ctx.strokeStyle = '#00ffcc'; ctx.beginPath(); mySnake.forEach(p => ctx.lineTo(p.x, p.y)); ctx.stroke();
+        }
+        requestAnimationFrame(loop);
+    }
+    loop();
+</script>
+</body>
+</html>
