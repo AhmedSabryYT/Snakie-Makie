@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Snakie Makie P2P</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { margin: 0; background: #000; color: #00ffcc; font-family: sans-serif; overflow: hidden; touch-action: none; }
+        canvas { display: block; }
+        .menu { position: fixed; inset: 0; background: rgba(0,0,0,0.95); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; text-align: center; }
+        input { background: #111; border: 2px solid #00ffcc; color: #00ffcc; padding: 15px; margin: 10px; border-radius: 8px; width: 70%; }
+        button { background: #00ffcc; color: #000; border: none; padding: 15px 30px; font-weight: bold; border-radius: 8px; box-shadow: 0 0 15px #00ffcc; }
+        #id-tag { position: fixed; top: 10px; left: 10px; font-size: 10px; opacity: 0.6; }
+    </style>
+</head>
+<body>
+<div id="id-tag">ID: <span id="my-id">...</span></div>
+<div id="menu" class="menu">
+    <h1>SNAKIE MAKIE</h1>
+    <p>Your ID: <b id="display-id">...</b></p>
+    <input type="text" id="join-id" placeholder="Friend's ID">
+    <button onclick="startJoin()">CONNECT TO FRIEND</button>
+</div>
+<canvas id="c"></canvas>
+<script>
+    const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
+    let peer = new Peer(), conn, isPlaying = false, mySnake = [], otherSnake = [], angle = 0;
+
+    peer.on('open', id => { 
+        document.getElementById('my-id').innerText = id; 
+        document.getElementById('display-id').innerText = id; 
+    });
+
+    peer.on('connection', c => { conn = c; setupConn(); start(); });
+
+    function startJoin() {
+        const id = document.getElementById('join-id').value;
+        if(!id) return alert("Enter ID!");
+        conn = peer.connect(id);
+        setupConn(); start();
+    }
+
+    function setupConn() { conn.on('data', data => { otherSnake = data; }); }
+
+    function start() {
+        isPlaying = true;
+        mySnake = Array(15).fill({x: window.innerWidth/2, y: window.innerHeight/2});
+        document.getElementById('menu').style.display = 'none';
+    }
+
+    // MOBILE TOUCH CONTROLS
+    window.addEventListener('touchmove', e => {
+        e.preventDefault();
+        const t = e.touches[0];
+        angle = Math.atan2(t.clientY - window.innerHeight/2, t.clientX - window.innerWidth/2);
+    }, { passive: false });
+
+    function loop() {
+        canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+        ctx.fillStyle = 'black'; ctx.fillRect(0,0,canvas.width,canvas.height);
+        if(isPlaying) {
+            const head = { x: mySnake[0].x + Math.cos(angle)*5, y: mySnake[0].y + Math.sin(angle)*5 };
+            if(head.x<0) head.x=canvas.width; if(head.x>canvas.width) head.x=0;
+            if(head.y<0) head.y=canvas.height; if(head.y>canvas.height) head.y=0;
+            mySnake.unshift(head); mySnake.pop();
+            if(conn && conn.open) conn.send(mySnake);
+            ctx.strokeStyle = '#00ffcc'; ctx.lineWidth = 15; ctx.lineCap = 'round';
+            ctx.beginPath(); mySnake.forEach(p => ctx.lineTo(p.x, p.y)); ctx.stroke();
+            if(otherSnake.length) {
+                ctx.strokeStyle = '#ff0055'; 
+                ctx.beginPath(); otherSnake.forEach(p => ctx.lineTo(p.x, p.y)); ctx.stroke();
+            }
+        }
+        requestAnimationFrame(loop);
+    }
+    loop();
+</script>
+</body>
+</html>
