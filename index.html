@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Snakie - Midnight Pro</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { margin: 0; background: #050510; color: #fff; font-family: 'Verdana', sans-serif; overflow: hidden; touch-action: none; }
+        canvas { display: block; position: absolute; top: 0; left: 0; }
+        
+        .ui { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 100; pointer-events: none; }
+        .panel { 
+            background: rgba(15, 15, 25, 0.98); border: 1px solid #334; 
+            padding: 30px; border-radius: 20px; pointer-events: auto; width: 280px; text-align: center;
+        }
+        h1 { font-weight: normal; letter-spacing: 4px; margin: 0 0 20px 0; color: #dcdde1; }
+        
+        button { 
+            background: #2f3640; border: 1px solid #718093; color: #f5f6fa; 
+            padding: 12px; margin: 5px 0; width: 100%; border-radius: 10px; cursor: pointer; font-weight: bold;
+        }
+        button:active { background: #718093; }
+        
+        input { background: #1e272e; border: 1px solid #485460; color: #fff; padding: 12px; width: 85%; border-radius: 8px; text-align: center; margin-bottom: 10px; font-size: 18px; }
+        .hidden { display: none !important; }
+        
+        #conn-msg { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #2f3640; padding: 15px 30px; border-radius: 50px; display: none; z-index: 200; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+<div id="conn-msg">SEARCHING FOR FRIEND...</div>
+
+<div id="menu" class="ui">
+    <div class="panel">
+        <h1>SNAKIE</h1>
+        <button onclick="startSingle()">SINGLE PLAYER</button>
+        <button onclick="showMulti()">MULTIPLAYER</button>
+        <button onclick="changeColor()">CHANGE COLOR</button>
+        <div id="color-preview" style="width:100%; height:6px; background:#6c5ce7; margin-top:12px; border-radius:3px;"></div>
+    </div>
+</div>
+
+<div id="multi-panel" class="ui hidden">
+    <div class="panel">
+        <p style="font-size: 11px; color: #7f8c8d; letter-spacing: 1px;">SHARE THIS CODE</p>
+        <h2 id="my-pin" style="font-size: 42px; margin: 5px 0 20px 0; color: #f5f6fa;">....</h2>
+        <input type="number" id="friend-pin" placeholder="FRIEND'S CODE">
+        <button onclick="connectPeer()">JOIN GAME</button>
+        <button onclick="location.reload()" style="background:transparent; border:none; color:#7f8c8d;">Back to Menu</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    let peer, conn, isGame = false, isMulti = false;
+    
+    let snake = [], otherSnake = [], fruit = {x:0, y:0};
+    let angle = 0, currAngle = 0, otherAngle = 0;
+    let cam = {x: 0, y: 0};
+    
+    const colors = ['#6c5ce7', '#00b894', '#0984e3', '#e17055', '#fdcb6e'];
+    let colorIdx = 0;
+    let myColor = colors[0];
+    let otherColor = '#fff';
+
+    // --- PEERJS LOGIC ---
+    function initPeer() {
+        const pin = Math.floor(1000 + Math.random() * 8999);
+        peer = new Peer('snk-' + pin);
+        peer.on('open', id => document.getElementById('my-pin').innerText = pin);
+        peer.on('connection', c => {
+            conn = c; isMulti = true; setupConnEvents(); startGame();
+        });
+    }
+
+    function showMulti() {
+        document.getElementById('menu').classList.add('hidden');
+        document.getElementById('multi-panel').classList.remove('hidden');
+        initPeer();
+    }
+
+    function connectPeer() {
+        const p = document.getElementById('friend-pin').value;
+        if(!p) return;
+        document.getElementById('conn-msg').style.display = 'block';
+        conn = peer.connect('snk-' + p);
+        conn.on('open', () => {
+            document.getElementById('conn-msg').style.display = 'none';
+            isMulti = true; setupConnEvents(); startGame();
+        });
+    }
+
+    function setupConnEvents() {
+        conn.on('data', d => {
+            if(d.t === 'm') { 
+                otherSnake = d.pos; 
+                otherColor = d.col; 
+                otherAngle = d.ang;
+            }
+        });
+    }
+
+    function changeColor() {
+        colorIdx = (colorIdx + 1) % colors.length;
+        myColor = colors[colorIdx];
+        document.getElementById('color-preview').style.background = myColor;
+    }
+
+    // --- GAME ENGINE ---
+    function startSingle() { isMulti = false; startGame(); }
+
+    function startGame() {
+        isGame = true;
+        document.querySelectorAll('.ui').forEach(u => u.classList.add('hidden'));
+        snake = Array(20).fill({x: 0, y: 0});
+        spawnFruit();
+    }
+
+    function spawnFruit() {
+        // Find a valid player head to spawn near
+        let anchor = snake[0];
+        if (isMulti && otherSnake.length > 0 && Math.random() > 0.5) {
+            anchor = otherSnake[0];
+        }
+        // Spawn apple in a small radius around a player so they don't have to travel far
+        fruit = { 
+            x: anchor.x + (Math.random() * 500 - 250), 
+            y: anchor.y + (Math.random() * 500 - 250) 
+        };
+    }
+
+    window.addEventListener('touchmove', e => {
+        angle = Math.atan2(e.touches[0].clientY - window.innerHeight/2, e.touches[0].clientX - window.innerWidth/2);
+    });
+
+    let stars = Array(150).fill(0).map(() => ({x: Math.random()*2000, y: Math.random()*2000, s: Math.random()*2}));
+    let moonRot = 0;
+
+    function loop() {
+        requestAnimationFrame(loop);
+        canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+        ctx.fillStyle = '#050510'; ctx.fillRect(0,0,canvas.width,canvas.height);
+
+        if(!isGame) return;
+
+        cam.x += (snake[0].x - canvas.width/2 - cam.x) * 0.1;
+        cam.y += (snake[0].y - canvas.height/2 - cam.y) * 0.1;
+
+        // Moon Animation
+        ctx.save();
+        ctx.translate(canvas.width - 120, 120);
+        moonRot += 0.003; ctx.rotate(moonRot);
+        ctx.fillStyle = '#f5f6fa'; ctx.beginPath(); ctx.arc(0,0,45,0,7); ctx.fill();
+        ctx.fillStyle = '#dcdde1'; // Gray spots
+        ctx.beginPath(); ctx.arc(15, 10, 8, 0, 7); ctx.fill();
+        ctx.beginPath(); ctx.arc(-10, -15, 12, 0, 7); ctx.fill();
+        ctx.beginPath(); ctx.arc(-20, 10, 5, 0, 7); ctx.fill();
+        ctx.restore();
+
+        ctx.save(); ctx.translate(-cam.x, -cam.y);
+
+        // Stars
+        ctx.fillStyle = '#fff';
+        stars.forEach(s => {
+            let sx = (s.x - cam.x * 0.2) % 2000; if(sx<0) sx+=2000;
+            let sy = (s.y - cam.y * 0.2) % 2000; if(sy<0) sy+=2000;
+            ctx.beginPath(); ctx.arc(cam.x + sx - 1000, cam.y + sy - 1000, s.s, 0, 7); ctx.fill();
+        });
+
+        // Movement
+        let diff = angle - currAngle;
+        while(diff < -Math.PI) diff += Math.PI*2;
+        while(diff > Math.PI) diff -= Math.PI*2;
+        currAngle += diff * 0.08;
+
+        const head = { x: snake[0].x + Math.cos(currAngle)*3.5, y: snake[0].y + Math.sin(currAngle)*3.5 };
+        snake.unshift(head);
+        if(Math.hypot(head.x - fruit.x, head.y - fruit.y) < 25) spawnFruit(); else snake.pop();
+
+        if(isMulti && conn && conn.open) conn.send({t:'m', pos:snake, col:myColor, ang:currAngle});
+
+        // Drawing Snakes & Eyes
+        const drawS = (body, c, lookAngle) => {
+            if(!body.length) return;
+            ctx.lineCap='round'; ctx.lineWidth=22; ctx.strokeStyle=c;
+            ctx.beginPath(); body.forEach(p => ctx.lineTo(p.x, p.y)); ctx.stroke();
+            
+            // --- 2 CANVAS EYES ---
+            const h = body[0];
+            const eyeOffset = 8;
+            const drawEye = (side) => {
+                let ex = h.x + Math.cos(lookAngle + 0.6 * side) * eyeOffset;
+                let ey = h.y + Math.sin(lookAngle + 0.6 * side) * eyeOffset;
+                // White part
+                ctx.fillStyle = 'white';
+                ctx.beginPath(); ctx.arc(ex, ey, 5, 0, 7); ctx.fill();
+                // Pupil part
+                ctx.fillStyle = 'black';
+                ctx.beginPath(); ctx.arc(ex + Math.cos(lookAngle)*2, ey + Math.sin(lookAngle)*2, 2, 0, 7); ctx.fill();
+            };
+            drawEye(1); drawEye(-1);
+        };
+
+        drawS(otherSnake, otherColor, otherAngle);
+        drawS(snake, myColor, currAngle);
+        
+        // --- CANVAS APPLE ---
+        ctx.save();
+        ctx.translate(fruit.x, fruit.y);
+        // Fruit Body
+        ctx.fillStyle = '#e17055'; 
+        ctx.beginPath(); ctx.arc(0, 0, 12, 0, 7); ctx.fill();
+        // Stem
+        ctx.strokeStyle = '#4b4b4b'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(0,-10); ctx.lineTo(0,-16); ctx.stroke();
+        // Leaf
+        ctx.fillStyle = '#2ecc71';
+        ctx.beginPath(); ctx.ellipse(4, -14, 5, 2, Math.PI/4, 0, 7); ctx.fill();
+        ctx.restore();
+
+        ctx.restore();
+
+        // Arrow
+        if(isMulti && otherSnake.length) {
+            let dx = otherSnake[0].x - snake[0].x, dy = otherSnake[0].y - snake[0].y;
+            if(Math.hypot(dx, dy) > 250) {
+                ctx.save(); ctx.translate(canvas.width/2, 60);
+                ctx.rotate(Math.atan2(dy, dx));
+                ctx.fillStyle = '#fab1a0';
+                ctx.beginPath(); ctx.moveTo(15,0); ctx.lineTo(-10,-8); ctx.lineTo(-10,8); ctx.fill();
+                ctx.restore();
+            }
+        }
+    }
+    loop();
+</script>
+</body>
+</html>
