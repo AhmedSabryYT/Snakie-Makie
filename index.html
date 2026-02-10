@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Snakie - Midnight Calm</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { margin: 0; background: #050510; color: #fff; font-family: 'Verdana', sans-serif; overflow: hidden; touch-action: none; }
+        canvas { display: block; position: absolute; top: 0; left: 0; }
+        
+        /* Calm UI Style */
+        .ui { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 100; pointer-events: none; }
+        .panel { 
+            background: rgba(20, 20, 35, 0.9); border: 1px solid #445; 
+            padding: 40px; border-radius: 15px; pointer-events: auto; width: 300px; text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        h1 { font-weight: normal; letter-spacing: 3px; margin-bottom: 5px; font-size: 28px; }
+        p { font-size: 11px; color: #889; margin-bottom: 25px; }
+        
+        button { 
+            background: #2a2a40; border: none; color: #dde; 
+            padding: 15px; margin: 8px 0; width: 100%; border-radius: 8px; 
+            font-size: 14px; cursor: pointer; transition: 0.2s;
+        }
+        button:hover { background: #3a3a55; color: #fff; }
+        
+        input { background: #151520; border: 1px solid #445; color: #fff; padding: 12px; width: 80%; border-radius: 8px; text-align: center; margin-bottom: 10px; }
+        .hidden { display: none !important; }
+        
+        #score-display { position: fixed; bottom: 20px; left: 20px; font-size: 16px; color: #889; }
+        #arrow-ui { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); text-align: center; display: none; }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+<div id="score-display">Score: 0</div>
+
+<div id="arrow-ui">
+    <div style="font-size: 10px; color: #889; margin-bottom: 5px;">ENEMY</div>
+    <div id="arrow-icon" style="font-size: 24px;">⬇</div>
+    <div id="dist-display" style="font-size: 10px; color: #667;">0m</div>
+</div>
+
+<div id="menu" class="ui">
+    <div class="panel">
+        <h1>SNAKIE</h1>
+        <p>MIDNIGHT EDITION</p>
+        <button onclick="startGame()">SINGLE PLAYER</button>
+        <button onclick="showMulti()">MULTIPLAYER</button>
+        <button onclick="changeColor()">CHANGE COLOR</button>
+        <div id="color-preview" style="width: 100%; height: 5px; background: #6c5ce7; margin-top: 10px; border-radius: 5px;"></div>
+    </div>
+</div>
+
+<div id="multi-panel" class="ui hidden">
+    <div class="panel">
+        <p>YOUR PIN</p>
+        <h2 id="my-pin" style="font-size: 32px; letter-spacing: 5px; margin: 10px 0;">....</h2>
+        <input type="number" id="friend-pin" placeholder="Friend's PIN">
+        <button onclick="connectPeer()">CONNECT</button>
+        <button onclick="location.reload()" style="background: transparent; color: #667;">Back</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    let peer, conn, myId, isGame = false, isMulti = false;
+    
+    // Game State
+    let snake = [], otherSnake = [], fruit = {x:0, y:0};
+    let angle = 0, currAngle = 0, score = 0;
+    let cam = {x: 0, y: 0};
+    
+    // Moon & Atmosphere
+    let moonRot = 0;
+    let craters = Array(5).fill(0).map(() => ({x: Math.random()*40-20, y: Math.random()*40-20, r: Math.random()*5+2}));
+
+    // Colors (Calm Palette)
+    const colors = ['#6c5ce7', '#00b894', '#0984e3', '#e17055', '#fdcb6e', '#a29bfe'];
+    let colorIdx = 0;
+    let myColor = colors[0];
+    let otherColor = '#ff7675'; // Default enemy color
+
+    // --- 1. OLD SCHOOL PEER CONNECTION (STABLE) ---
+    function initPeer() {
+        const pin = Math.floor(Math.random() * 9000) + 1000;
+        peer = new Peer('snakie-' + pin);
+        
+        peer.on('open', (id) => {
+            document.getElementById('my-pin').innerText = pin;
+        });
+
+        peer.on('connection', (c) => {
+            conn = c; isMulti = true; setupConn(); startGame();
+        });
+        
+        peer.on('error', (err) => {
+            console.log(err);
+            if(err.type === 'unavailable-id') initPeer(); // Auto-retry new ID
+        });
+    }
+
+    function showMulti() {
+        document.getElementById('menu').classList.add('hidden');
+        document.getElementById('multi-panel').classList.remove('hidden');
+        initPeer();
+    }
+
+    function connectPeer() {
+        const p = document.getElementById('friend-pin').value;
+        if(!p) return alert("Enter PIN");
+        conn = peer.connect('snakie-' + p);
+        isMulti = true; setupConn(); startGame();
+    }
+
+    function setupConn() {
+        conn.on('data', (d) => {
+            if(d.t === 'm') { 
+                otherSnake = d.pos; 
+                otherColor = d.col; // Sync color!
+            }
+        });
+    }
+
+    function changeColor() {
+        colorIdx = (colorIdx + 1) % colors.length;
+        myColor = colors[colorIdx];
+        document.getElementById('color-preview').style.background = myColor;
+    }
+
+    // --- 2. GAME ENGINE ---
+    function startGame() {
+        isGame = true;
+        document.querySelectorAll('.ui').forEach(u => u.classList.add('hidden'));
+        snake = Array(20).fill({x: 0, y: 0});
+        spawnFruit();
+    }
+
+    function spawnFruit() {
+        fruit = {
+            x: snake[0].x + (Math.random() * 800 - 400), 
+            y: snake[0].y + (Math.random() * 800 - 400)
+        };
+    }
+
+    // Input
+    window.addEventListener('touchmove', e => {
+        let dx = e.touches[0].clientX - window.innerWidth/2;
+        let dy = e.touches[0].clientY - window.innerHeight/2;
+        angle = Math.atan2(dy, dx);
+    });
+
+    // Environment
+    let stars = Array(200).fill(0).map(() => ({x: Math.random()*2000, y: Math.random()*2000, s: Math.random()*2}));
+
+    function loop() {
+        requestAnimationFrame(loop);
+        canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+        
+        // Background (Night Sky)
+        ctx.fillStyle = '#050510';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        if(!isGame) return;
+
+        // Camera Math
+        cam.x += (snake[0].x - canvas.width/2 - cam.x) * 0.1;
+        cam.y += (snake[0].y - canvas.height/2 - cam.y) * 0.1;
+
+        // --- DRAW MOON (Fixed Position in Sky) ---
+        // We draw the moon BEFORE scaling/translating the camera so it stays "far away"
+        let moonX = canvas.width * 0.8; 
+        let moonY = canvas.height * 0.2;
+        moonRot += 0.002; // Slow spin
+
+        ctx.save();
+        ctx.translate(moonX, moonY);
+        ctx.rotate(moonRot);
+        ctx.fillStyle = '#dfe6e9'; // Moon color
+        ctx.beginPath(); ctx.arc(0, 0, 60, 0, Math.PI*2); ctx.fill(); // Base moon
+        ctx.fillStyle = '#b2bec3'; // Crater color
+        craters.forEach(c => {
+            ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI*2); ctx.fill();
+        });
+        ctx.restore();
+
+        ctx.save();
+        ctx.translate(-cam.x, -cam.y);
+
+        // --- CORRECTED STARS (Flow backwards) ---
+        ctx.fillStyle = '#fff';
+        stars.forEach(s => {
+            // Subtract camera to make them move opposite to player
+            let sx = (s.x - cam.x * 0.5) % 2000; 
+            if(sx < 0) sx += 2000;
+            let sy = (s.y - cam.y * 0.5) % 2000; 
+            if(sy < 0) sy += 2000;
+            
+            // Draw relative to camera so they wrap correctly
+            ctx.beginPath(); ctx.arc(cam.x + sx - 1000, cam.y + sy - 1000, s.s, 0, Math.PI*2); ctx.fill();
+        });
+
+        // Movement
+        let diff = angle - currAngle;
+        while(diff < -Math.PI) diff += Math.PI*2;
+        while(diff > Math.PI) diff -= Math.PI*2;
+        currAngle += diff * 0.08;
+
+        const head = { x: snake[0].x + Math.cos(currAngle)*3.5, y: snake[0].y + Math.sin(currAngle)*3.5 };
+        snake.unshift(head);
+
+        // Eating
+        if(Math.hypot(head.x - fruit.x, head.y - fruit.y) < 30) {
+            spawnFruit(); score++;
+            document.getElementById('score-display').innerText = "Score: " + score;
+        } else {
+            snake.pop();
+        }
+
+        // Network
+        if(isMulti && conn && conn.open) {
+            conn.send({t: 'm', pos: snake, col: myColor});
+        }
+
+        // Draw Player Function
+        function drawPlayer(body, color) {
+            if(body.length < 1) return;
+            ctx.lineCap = 'round';
+            ctx.lineWidth = 22;
+            ctx.strokeStyle = color;
+            ctx.beginPath();
+            body.forEach(p => ctx.lineTo(p.x, p.y));
+            ctx.stroke();
+
+            // --- 2 CANVAS EYES ---
+            const h = body[0];
+            // Calc angle of head based on first 2 segments
+            let hAngle = currAngle;
+            if(body[1]) hAngle = Math.atan2(h.y - body[1].y, h.x - body[1].x);
+
+            ctx.fillStyle = 'white'; // Sclera
+            let ex1 = h.x + Math.cos(hAngle + 0.6) * 8;
+            let ey1 = h.y + Math.sin(hAngle + 0.6) * 8;
+            let ex2 = h.x + Math.cos(hAngle - 0.6) * 8;
+            let ey2 = h.y + Math.sin(hAngle - 0.6) * 8;
+            
+            ctx.beginPath(); ctx.arc(ex1, ey1, 5, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(ex2, ey2, 5, 0, Math.PI*2); ctx.fill();
+
+            ctx.fillStyle = 'black'; // Pupil
+            ctx.beginPath(); ctx.arc(ex1 + Math.cos(hAngle)*2, ey1 + Math.sin(hAngle)*2, 2.5, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(ex2 + Math.cos(hAngle)*2, ey2 + Math.sin(hAngle)*2, 2.5, 0, Math.PI*2); ctx.fill();
+        }
+
+        drawPlayer(otherSnake, otherColor);
+        drawPlayer(snake, myColor);
+
+        // Apple
+        ctx.fillStyle = '#e17055';
+        ctx.beginPath(); ctx.arc(fruit.x, fruit.y, 12, 0, Math.PI*2); ctx.fill();
+
+        ctx.restore(); // End world drawing
+
+        // --- TOP ARROW UI ---
+        if(isMulti && otherSnake.length > 0) {
+            const arrowDiv = document.getElementById('arrow-ui');
+            const icon = document.getElementById('arrow-icon');
+            arrowDiv.style.display = 'block';
+
+            let dx = otherSnake[0].x - snake[0].x;
+            let dy = otherSnake[0].y - snake[0].y;
+            let dist = Math.round(Math.hypot(dx, dy) / 10);
+            let dirAngle = Math.atan2(dy, dx) * (180/Math.PI);
+
+            // Rotate arrow icon (adding 90 because default ⬇ is down)
+            icon.style.transform = `rotate(${dirAngle - 90}deg)`; 
+            document.getElementById('dist-display').innerText = dist + "m";
+        }
+    }
+    loop();
+</script>
+</body>
+</html>
