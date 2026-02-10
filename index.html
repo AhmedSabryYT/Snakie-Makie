@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Snakie Makie - Old School</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { margin: 0; background: #000; color: #0ff; font-family: monospace; overflow: hidden; touch-action: none; }
+        canvas { display: block; position: absolute; top: 0; left: 0; }
+        
+        /* The "Cooler Simple" Menu you asked for */
+        #ui-layer { position: fixed; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; z-index: 10; }
+        .menu-box { 
+            background: rgba(0, 20, 40, 0.9); border: 4px solid #0ff; 
+            padding: 40px; text-align: center; pointer-events: auto; 
+            box-shadow: 0 0 50px #0ff; border-radius: 20px;
+        }
+        h1 { font-size: 40px; margin: 0; text-shadow: 0 0 20px #0ff; }
+        p { margin: 10px 0 30px; opacity: 0.7; }
+        
+        button { 
+            display: block; width: 100%; font-family: monospace; font-size: 20px; font-weight: bold;
+            padding: 15px; margin: 10px 0; background: #000; color: #0ff; 
+            border: 2px solid #0ff; cursor: pointer; text-transform: uppercase;
+        }
+        button:hover { background: #0ff; color: #000; }
+        
+        input { 
+            font-family: monospace; font-size: 20px; padding: 10px; width: 80%; 
+            background: #000; border: 2px solid #0ff; color: #fff; text-align: center; margin-bottom: 10px;
+        }
+
+        #game-ui { display: none; position: fixed; top: 20px; right: 20px; font-size: 20px; font-weight: bold; text-shadow: 0 0 10px #0ff; }
+        .hide { display: none !important; }
+    </style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+<div id="game-ui">SCORE: 0</div>
+
+<div id="ui-layer">
+    <div id="main-menu" class="menu-box">
+        <h1>SNAKIE</h1>
+        <p>ORIGINAL VERSION</p>
+        <button onclick="startGame(false)">SINGLE PLAYER</button>
+        <button onclick="openMulti()">MULTIPLAYER</button>
+        <button onclick="changeColor()">CHANGE COLOR</button>
+    </div>
+
+    <div id="multi-menu" class="menu-box hide">
+        <p>YOUR PIN</p>
+        <h1 id="my-pin">...</h1>
+        <input id="friend-pin" type="number" placeholder="FRIEND PIN">
+        <button onclick="connectToFriend()">CONNECT</button>
+        <button onclick="location.reload()">BACK</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    
+    // --- THE VERY OLD VARIABLES ---
+    let peer = null;
+    let conn = null;
+    let myId = null;
+    let isGame = false;
+    let isMulti = false;
+    let score = 0;
+    
+    // Game vars
+    let snake = []; 
+    let otherSnake = [];
+    let fruit = {x: 0, y: 0};
+    let angle = 0;
+    let currAngle = 0;
+    let cam = {x: 0, y: 0};
+    let color = '#0ff';
+
+    // --- 1. THE ORIGINAL PEERJS SETUP (SEARCH RESULT: BASIC CONNECTION) ---
+    // No fancy error handling. No "smart" IDs. Just random numbers.
+    
+    function initPeer() {
+        // Generate a random 4-digit PIN manually
+        let randomPin = Math.floor(Math.random() * 9000) + 1000;
+        myId = 'snakie-' + randomPin; 
+
+        // Create peer with this specific ID
+        peer = new Peer(myId);
+
+        peer.on('open', function(id) {
+            console.log('My peer ID is: ' + id);
+            document.getElementById('my-pin').innerText = randomPin;
+        });
+
+        peer.on('connection', function(c) {
+            // Someone connected to us!
+            conn = c;
+            isMulti = true;
+            setupData();
+            startGame(true);
+        });
+
+        peer.on('error', function(err) {
+            console.log(err);
+            // Classic fix: If error, just try a new ID automatically
+            if(err.type === 'unavailable-id') {
+                initPeer(); 
+            } else {
+                alert("Connection Error: " + err.type);
+            }
+        });
+    }
+
+    function openMulti() {
+        document.getElementById('main-menu').classList.add('hide');
+        document.getElementById('multi-menu').classList.remove('hide');
+        initPeer();
+    }
+
+    function connectToFriend() {
+        let p = document.getElementById('friend-pin').value;
+        if(!p) return alert("ENTER A PIN");
+        
+        let friendId = 'snakie-' + p;
+        conn = peer.connect(friendId);
+        
+        conn.on('open', function() {
+            // Connection established!
+            isMulti = true;
+            setupData();
+            startGame(true);
+        });
+        
+        conn.on('error', function(err) { alert("Could not connect: " + err); });
+    }
+
+    function setupData() {
+        conn.on('data', function(data) {
+            // Simple data handling
+            if(data.t === 'm') otherSnake = data.val; 
+        });
+    }
+
+    // --- GAME ENGINE ---
+    
+    function changeColor() {
+        color = (color === '#0ff') ? '#f0f' : '#0ff';
+        document.body.style.color = color;
+        // Update menu borders dynamically
+        document.querySelectorAll('.menu-box').forEach(b => {
+            b.style.borderColor = color;
+            b.style.boxShadow = `0 0 50px ${color}`;
+        });
+        document.querySelectorAll('button').forEach(b => {
+            b.style.borderColor = color;
+            b.style.color = color;
+        });
+        alert("Color changed!");
+    }
+
+    function startGame(multi) {
+        isMulti = multi;
+        isGame = true;
+        document.getElementById('ui-layer').classList.add('hide');
+        document.getElementById('game-ui').style.display = 'block';
+        snake = Array(20).fill({x: 0, y: 0});
+        spawnFruit();
+    }
+
+    function spawnFruit() {
+        // Infinite map logic: fruit spawns near snake
+        fruit.x = snake[0].x + (Math.random()*1000 - 500);
+        fruit.y = snake[0].y + (Math.random()*1000 - 500);
+    }
+
+    window.addEventListener('touchmove', function(e) {
+        let tx = e.touches[0].clientX - window.innerWidth/2;
+        let ty = e.touches[0].clientY - window.innerHeight/2;
+        angle = Math.atan2(ty, tx);
+    });
+    
+    // Stars for background
+    let stars = [];
+    for(let i=0; i<100; i++) stars.push({x: Math.random()*2000, y: Math.random()*2000, s: Math.random()*3});
+
+    function loop() {
+        requestAnimationFrame(loop);
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        
+        // Background
+        ctx.fillStyle = '#000814';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        if(!isGame) return;
+
+        // Camera follow
+        cam.x += (snake[0].x - canvas.width/2 - cam.x) * 0.1;
+        cam.y += (snake[0].y - canvas.height/2 - cam.y) * 0.1;
+
+        ctx.save();
+        ctx.translate(-cam.x, -cam.y);
+
+        // Draw Stars
+        ctx.fillStyle = '#fff';
+        stars.forEach(s => {
+            let sx = (s.x + cam.x) % 2000; if(sx<0) sx+=2000;
+            let sy = (s.y + cam.y) % 2000; if(sy<0) sy+=2000;
+            ctx.beginPath(); ctx.arc(cam.x + sx - 1000, cam.y + sy - 1000, s.s, 0, Math.PI*2); ctx.fill();
+        });
+
+        // Move Snake
+        let diff = angle - currAngle;
+        // Normalize angle
+        while(diff < -Math.PI) diff += Math.PI*2;
+        while(diff > Math.PI) diff -= Math.PI*2;
+        currAngle += diff * 0.1;
+
+        let head = {
+            x: snake[0].x + Math.cos(currAngle) * 4,
+            y: snake[0].y + Math.sin(currAngle) * 4
+        };
+        snake.unshift(head);
+
+        // Eat Fruit
+        let dx = head.x - fruit.x;
+        let dy = head.y - fruit.y;
+        if(Math.sqrt(dx*dx + dy*dy) < 30) {
+            score++;
+            document.getElementById('game-ui').innerText = "SCORE: " + score;
+            spawnFruit();
+        } else {
+            snake.pop();
+        }
+
+        // Send Data (Old School: only send if connected)
+        if(isMulti && conn && conn.open) {
+            conn.send({t: 'm', val: snake});
+        }
+
+        // Draw Fruit
+        ctx.fillStyle = 'red';
+        ctx.beginPath(); ctx.arc(fruit.x, fruit.y, 15, 0, Math.PI*2); ctx.fill();
+
+        // Draw Other Snake
+        if(isMulti && otherSnake.length > 0) {
+            ctx.strokeStyle = '#f00';
+            ctx.lineWidth = 20;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            otherSnake.forEach(p => ctx.lineTo(p.x, p.y));
+            ctx.stroke();
+        }
+
+        // Draw My Snake
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 20;
+        ctx.lineCap = 'round';
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 20;
+        ctx.beginPath();
+        snake.forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.stroke();
+        ctx.shadowBlur = 0; // reset
+
+        // Eyes
+        ctx.fillStyle = 'white';
+        let ex = head.x + Math.cos(currAngle)*10;
+        let ey = head.y + Math.sin(currAngle)*10;
+        ctx.beginPath(); ctx.arc(ex, ey, 5, 0, Math.PI*2); ctx.fill();
+
+        ctx.restore();
+    }
+    loop();
+
+</script>
+</body>
+</html>
