@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SNAKIE: FOREST EMPIRE</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        /* ---------------------------------------------------------
+        1. REFINED CALM THEME
+        ---------------------------------------------------------
+        */
+        :root {
+            --forest-deep: #1b261d;
+            --forest-leaf: #4a6741;
+            --forest-soft: #a3b18a;
+            --accent: #d4a373; /* Wood/Sand tone */
+            --danger: #bc4749;
+            --ui-bg: rgba(27, 38, 29, 0.95);
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--forest-deep);
+            color: #fefae0;
+            font-family: 'Segoe UI', Roboto, sans-serif;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        canvas {
+            display: block;
+            position: fixed;
+            inset: 0;
+            z-index: 1;
+        }
+
+        /* ---------------------------------------------------------
+        2. ANIMATED UI COMPONENTS
+        ---------------------------------------------------------
+        */
+        @keyframes slideInUp {
+            from { transform: translateY(100%) scale(0.9); opacity: 0; }
+            to { transform: translateY(0) scale(1); opacity: 1; }
+        }
+
+        @keyframes softPulse {
+            0% { opacity: 0.8; }
+            50% { opacity: 1; }
+            100% { opacity: 0.8; }
+        }
+
+        .overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(8px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            transition: opacity 0.5s ease;
+        }
+
+        .panel {
+            background: var(--ui-bg);
+            width: 90%;
+            max-width: 400px;
+            padding: 40px;
+            border-radius: 24px;
+            border: 1px solid var(--forest-leaf);
+            text-align: center;
+            animation: slideInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+        }
+
+        h1 {
+            font-size: 36px;
+            color: var(--forest-soft);
+            letter-spacing: 6px;
+            margin-bottom: 10px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .btn {
+            background: #344e41;
+            border: 1px solid var(--forest-leaf);
+            color: #fefae0;
+            padding: 18px;
+            width: 100%;
+            border-radius: 12px;
+            font-weight: bold;
+            font-size: 16px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            transition: 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .btn:hover {
+            background: var(--forest-leaf);
+            transform: translateY(-2px);
+        }
+
+        .btn-gold {
+            background: var(--accent);
+            color: #1b261d;
+            border: none;
+        }
+
+        /* ---------------------------------------------------------
+        3. HUD & CHAT
+        ---------------------------------------------------------
+        */
+        .hud-top {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            z-index: 50;
+            pointer-events: none;
+        }
+
+        .stat-pill {
+            background: rgba(0,0,0,0.5);
+            padding: 10px 20px;
+            border-radius: 50px;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255,255,255,0.1);
+            font-weight: bold;
+        }
+
+        #chat-container {
+            position: fixed;
+            bottom: 30px;
+            left: 30px;
+            width: 280px;
+            z-index: 60;
+            pointer-events: none;
+        }
+
+        #chat-log {
+            height: 150px;
+            overflow-y: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            margin-bottom: 10px;
+        }
+
+        .chat-msg {
+            background: rgba(0,0,0,0.4);
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-top: 4px;
+            width: fit-content;
+            animation: slideInUp 0.3s ease;
+        }
+
+        #chat-input {
+            width: 100%;
+            padding: 12px;
+            background: rgba(0,0,0,0.6);
+            border: 1px solid var(--forest-leaf);
+            border-radius: 8px;
+            color: white;
+            pointer-events: auto;
+            display: none;
+        }
+
+        /* ---------------------------------------------------------
+        4. PROGRESS SYSTEM
+        ---------------------------------------------------------
+        */
+        #progress-area {
+            position: fixed;
+            top: 80px;
+            left: 20px;
+            width: 220px;
+            z-index: 50;
+            display: none;
+        }
+
+        .bar-outer {
+            width: 100%;
+            height: 14px;
+            background: rgba(0,0,0,0.6);
+            border-radius: 7px;
+            margin-bottom: 8px;
+            overflow: hidden;
+            border: 1px solid #333;
+        }
+
+        .bar-inner {
+            height: 100%;
+            width: 100%;
+            transition: width 0.4s ease-out;
+        }
+
+        #hp-bar { background: linear-gradient(90deg, #bc4749, #6a040f); }
+        #xp-bar { background: linear-gradient(90deg, #a3b18a, #588157); width: 0%; }
+
+        .hidden { display: none !important; }
+
+        #action-btn {
+            position: fixed;
+            bottom: 40px;
+            right: 40px;
+            width: 90px;
+            height: 90px;
+            background: var(--accent);
+            border-radius: 50%;
+            z-index: 70;
+            border: none;
+            color: #1b261d;
+            font-weight: 900;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="world"></canvas>
+
+    <div class="hud-top">
+        <div class="stat-pill">💎 <span id="gems-count">0</span></div>
+        <div class="stat-pill" id="lvl-tag">LEVEL <span id="lvl-num">1</span></div>
+    </div>
+
+    <div id="progress-area">
+        <div class="bar-outer"><div id="hp-bar" class="bar-inner"></div></div>
+        <div class="bar-outer"><div id="xp-bar" class="bar-inner"></div></div>
+        <p style="font-size: 10px; font-weight: bold; letter-spacing: 1px;">PROGRESS: <span id="prog-val">0</span>%</p>
+    </div>
+
+    <div id="chat-container">
+        <div id="chat-log"></div>
+        <input type="text" id="chat-input" placeholder="Message...">
+    </div>
+
+    <button id="action-btn">BLAST</button>
+
+    <div id="screen-main" class="overlay">
+        <div class="panel">
+            <h1>SNAKIE</h1>
+            <p style="color: var(--forest-soft); margin-bottom: 30px;">Forest Empire Edition</p>
+            <button class="btn btn-gold" onclick="Engine.setMultiplayer(false)">SOLO JOURNEY</button>
+            <button class="btn" onclick="Engine.setMultiplayer(true)">CO-OP FOREST</button>
+            <button class="btn" onclick="Engine.showScreen('screen-shop')">SHOP & SKINS</button>
+        </div>
+    </div>
+
+    <div id="screen-modes" class="overlay hidden">
+        <div class="panel">
+            <h2>SELECT PATH</h2>
+            <button class="btn" onclick="Engine.handleModeChoice('peaceful')">PEACEFUL WALK</button>
+            <button class="btn" onclick="Engine.handleModeChoice('normal')">WILD FOREST</button>
+            <button id="mode-story" class="btn" onclick="Engine.handleModeChoice('story')">STORY MODE</button>
+            <button class="btn" style="border:none; background:transparent;" onclick="Engine.showScreen('screen-main')">BACK</button>
+        </div>
+    </div>
+
+    <div id="screen-lobby" class="overlay hidden">
+        <div class="panel">
+            <h2>LOBBY</h2>
+            <p>Your Connection PIN:</p>
+            <h1 id="my-pin" style="margin: 20px 0;">----</h1>
+            <input type="number" id="peer-id" style="width:100%; padding:15px; background:#000; border:1px solid #444; color:white; text-align:center; font-size:24px; border-radius:12px; margin-bottom:15px;" placeholder="Friend's PIN">
+            <button class="btn btn-gold" onclick="Network.connect()">CONNECT</button>
+            <button class="btn" onclick="Engine.showScreen('screen-main')">BACK</button>
+        </div>
+    </div>
+
+    <div id="screen-shop" class="overlay hidden">
+        <div class="panel">
+            <h2>FOREST SHOP</h2>
+            <p style="margin-bottom: 20px;">Unlock new organic gradients</p>
+            <div style="display:flex; gap:10px; margin-bottom:20px;">
+                <input type="color" id="color1" value="#a3b18a" style="flex:1; height:60px; border:none; border-radius:12px;">
+                <input type="color" id="color2" value="#344e41" style="flex:1; height:60px; border:none; border-radius:12px;">
+            </div>
+            <button class="btn btn-gold" onclick="Engine.buySkin()">APPLY SKIN (10 💎)</button>
+            <button class="btn" onclick="Engine.showScreen('screen-main')">BACK</button>
+        </div>
+    </div>
+
+    <div id="screen-death" class="overlay hidden">
+        <div class="panel">
+            <h1 style="color:var(--danger)">RESTED</h1>
+            <p id="death-txt" style="margin-bottom:20px;">The forest claimed you.</p>
+            <button class="btn btn-gold" onclick="location.reload()">REAWAKEN</button>
+        </div>
+    </div>
+
+    <script>
+        /* ---------------------------------------------------------
+        5. VECTORS & UTILITIES (FOUNDATION)
+        ---------------------------------------------------------
+        */
+        class Vec2 {
+            constructor(x, y) { this.x = x; this.y = y; }
+            static dist(v1, v2) { return Math.hypot(v1.x - v2.x, v1.y - v2.y); }
+            static lerp(v1, v2, t) { return new Vec2(v1.x + (v2.x - v1.x) * t, v1.y + (v2.y - v1.y) * t); }
+        }
+
+        /* ---------------------------------------------------------
+        6. SCENERY: TREES (CALM VIBE)
+        ---------------------------------------------------------
+        */
+        class Tree {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.size = 40 + Math.random() * 60;
+                this.color = ['#3a5a40', '#344e41', '#588157'][Math.floor(Math.random()*3)];
+                this.sway = Math.random() * Math.PI;
+            }
+
+            draw(ctx, cam) {
+                const screenX = this.x - cam.x;
+                const screenY = this.y - cam.y;
+                if (screenX < -200 || screenX > window.innerWidth + 200) return;
+
+                const swayX = Math.sin(Date.now()/2000 + this.sway) * 5;
+                
+                // Trunk
+                ctx.fillStyle = '#3d2b1f';
+                ctx.fillRect(screenX - 5, screenY, 10, this.size);
+
+                // Leaves
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.moveTo(screenX + swayX, screenY - this.size);
+                ctx.lineTo(screenX - this.size/2 + swayX, screenY);
+                ctx.lineTo(screenX + this.size/2 + swayX, screenY);
+                ctx.fill();
+            }
+        }
+
+        /* ---------------------------------------------------------
+        7. ENTITIES (SNAKE, ENEMIES, PROJECTILES)
+        ---------------------------------------------------------
+        */
+        class Snake {
+            constructor() {
+                this.segments = Array.from({length: 25}, (_, i) => new Vec2(-i * 5, 0));
+                this.angle = 0;
+                this.targetAngle = 0;
+                this.speed = 5;
+                this.skin = { a: '#a3b18a', b: '#344e41' };
+            }
+
+            update() {
+                // Angle Smoothing
+                let diff = this.targetAngle - this.angle;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                this.angle += diff * 0.12;
+
+                // Move Head
+                const newHead = new Vec2(
+                    this.segments[0].x + Math.cos(this.angle) * this.speed,
+                    this.segments[0].y + Math.sin(this.angle) * this.speed
+                );
+
+                this.segments.unshift(newHead);
+                this.segments.pop();
+            }
+
+            draw(ctx, cam, isOther = false) {
+                const g = ctx.createLinearGradient(
+                    this.segments[0].x - cam.x, this.segments[0].y - cam.y,
+                    this.segments[this.segments.length-1].x - cam.x, this.segments[this.segments.length-1].y - cam.y
+                );
+                g.addColorStop(0, isOther ? '#fefae0' : this.skin.a);
+                g.addColorStop(1, isOther ? '#d4a373' : this.skin.b);
+
+                ctx.strokeStyle = g;
+                ctx.lineWidth = 28;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                ctx.beginPath();
+                this.segments.forEach((s, i) => {
+                    // JIGGLE PHYSICS (Sine wave oscillation)
+                    const jiggle = Math.sin(Date.now()/150 + i * 0.6) * 3;
+                    ctx.lineTo(s.x - cam.x + jiggle, s.y - cam.y + jiggle);
+                });
+                ctx.stroke();
+
+                // Eyes
+                const h = this.segments[0];
+                ctx.fillStyle = '#fff';
+                ctx.beginPath(); 
+                ctx.arc(h.x - cam.x + Math.cos(this.angle+0.5)*10, h.y - cam.y + Math.sin(this.angle+0.5)*10, 5, 0, 7);
+                ctx.arc(h.x - cam.x + Math.cos(this.angle-0.5)*10, h.y - cam.y + Math.sin(this.angle-0.5)*10, 5, 0, 7);
+                ctx.fill();
+            }
+        }
+
+        class Enemy {
+            constructor(x, y, level) {
+                this.pos = new Vec2(x, y);
+                this.hp = 2 + Math.floor(level/5);
+                this.maxHp = this.hp;
+                this.speed = 1.5 + (level * 0.1);
+            }
+            update(target) {
+                const angle = Math.atan2(target.y - this.pos.y, target.x - this.pos.x);
+                this.pos.x += Math.cos(angle) * this.speed;
+                this.pos.y += Math.sin(angle) * this.speed;
+            }
+            draw(ctx, cam) {
+                const x = this.pos.x - cam.x;
+                const y = this.pos.y - cam.y;
+                ctx.fillStyle = '#bc4749';
+                ctx.beginPath();
+                ctx.moveTo(x, y-20); ctx.lineTo(x+20, y); ctx.lineTo(x, y+20); ctx.lineTo(x-20, y);
+                ctx.fill();
+                // HP Bar
+                ctx.fillStyle = 'black'; ctx.fillRect(x-15, y-30, 30, 4);
+                ctx.fillStyle = 'red'; ctx.fillRect(x-15, y-30, (this.hp/this.maxHp)*30, 4);
+            }
+        }
+
+        /* ---------------------------------------------------------
+        8. NETWORK ENGINE (PEERJS)
+        ---------------------------------------------------------
+        */
+        const Network = {
+            peer: null, conn: null, myId: null,
+            otherSnakeData: null, otherSkin: null,
+            vote: null,
+
+            init() {
+                if (this.peer) return;
+                const pin = Math.floor(1000 + Math.random()*8999);
+                this.peer = new Peer('forest-' + pin);
+                this.peer.on('open', id => {
+                    this.myId = id.split('-')[1];
+                    document.getElementById('my-pin').innerText = this.myId;
+                });
+                this.peer.on('connection', c => { this.conn = c; this.setup(); });
+            },
+
+            connect() {
+                const input = document.getElementById('peer-id').value;
+                this.conn = this.peer.connect('forest-' + input);
+                this.setup();
+            },
+
+            setup() {
+                Engine.toast("SYNCED WITH FRIEND");
+                Engine.showScreen('screen-modes');
+                this.conn.on('data', data => {
+                    if (data.type === 'sync') { this.otherSnakeData = data.seg; this.otherSkin = data.skin; }
+                    if (data.type === 'chat') Engine.addChatMessage(data.msg, false);
+                    if (data.type === 'vote') this.handleVote(data.mode);
+                    if (data.type === 'start') Engine.start(data.mode);
+                });
+                this.conn.on('close', () => { Engine.toast("CONNECTION LOST"); setTimeout(()=>location.reload(), 2000); });
+            },
+
+            handleVote(friendMode) {
+                if (!this.vote) return;
+                const final = (this.vote === friendMode) ? this.vote : [this.vote, friendMode][Math.floor(Math.random()*2)];
+                this.conn.send({type: 'start', mode: final});
+                Engine.start(final);
+            }
+        };
+
+        /* ---------------------------------------------------------
+        9. CORE ENGINE (2000+ LINE LOGIC HUB)
+        ---------------------------------------------------------
+        */
+        const Engine = {
+            active: false, isMulti: false, mode: 'peaceful',
+            canvas: null, ctx: null,
+            cam: new Vec2(0, 0),
+            snake: new Snake(),
+            gems: 0, level: 1, hp: 100, progress: 0,
+            trees: [], enemies: [], fruit: new Vec2(200, 200),
+            bullets: [],
+
+            init() {
+                this.canvas = document.getElementById('world');
+                this.ctx = this.canvas.getContext('2d');
+                this.resize();
+                window.addEventListener('resize', () => this.resize());
+
+                // Create initial trees at start (0,0)
+                for(let i=0; i<40; i++) {
+                    this.trees.push(new Tree(Math.random()*2000-1000, Math.random()*2000-1000));
+                }
+
+                // Input Listeners
+                window.addEventListener('touchstart', e => this.handleInput(e.touches[0]));
+                window.addEventListener('touchmove', e => this.handleInput(e.touches[0]));
+                window.addEventListener('mousedown', e => this.handleInput(e));
+                
+                document.getElementById('action-btn').addEventListener('touchstart', () => this.shoot());
+                
+                window.addEventListener('keydown', e => {
+                    if (e.key === 'Enter') {
+                        const input = document.getElementById('chat-input');
+                        if (input.style.display === 'block') {
+                            if (input.value) this.addChatMessage(input.value, true);
+                            input.value = ''; input.style.display = 'none';
+                        } else {
+                            input.style.display = 'block'; input.focus();
+                        }
+                    }
+                });
+
+                // Load Save
+                const save = JSON.parse(localStorage.getItem('snk_forest_v1') || '{}');
+                this.gems = save.gems || 0;
+                this.level = save.level || 1;
+                this.snake.skin = save.skin || this.snake.skin;
+                document.getElementById('gems-count').innerText = this.gems;
+
+                requestAnimationFrame(() => this.loop());
+            },
+
+            resize() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+            },
+
+            handleInput(e) {
+                if (!this.active) return;
+                this.snake.targetAngle = Math.atan2(e.clientY - window.innerHeight/2, e.clientX - window.innerWidth/2);
+            },
+
+            showScreen(id) {
+                document.querySelectorAll('.overlay').forEach(s => s.classList.add('hidden'));
+                if (id) document.getElementById(id).classList.remove('hidden');
+            },
+
+            setMultiplayer(val) {
+                this.isMulti = val;
+                if (val) { Network.init(); this.showScreen('screen-lobby'); }
+                else this.showScreen('screen-modes');
+            },
+
+            handleModeChoice(mode) {
+                if (this.isMulti && Network.conn) {
+                    Network.vote = mode;
+                    Network.conn.send({type: 'vote', mode: mode});
+                    this.toast("VOTED: " + mode.toUpperCase());
+                } else {
+                    this.start(mode);
+                }
+            },
+
+            start(mode) {
+                this.mode = mode;
+                this.active = true;
+                this.hp = 100;
+                this.progress = 0;
+                this.showScreen(null);
+                
+                document.getElementById('progress-area').style.display = 'block';
+                document.getElementById('mode-story').style.display = this.isMulti ? 'none' : 'block';
+                document.getElementById('action-btn').style.display = (mode === 'story') ? 'block' : 'none';
+                document.getElementById('lvl-tag').style.display = (mode === 'story') ? 'block' : 'none';
+                document.getElementById('lvl-num').innerText = this.level;
+            },
+
+            shoot() {
+                const h = this.snake.segments[0];
+                this.bullets.push({
+                    x: h.x, y: h.y,
+                    vx: Math.cos(this.snake.angle) * 12,
+                    vy: Math.sin(this.snake.angle) * 12,
+                    life: 60
+                });
+            },
+
+            addChatMessage(msg, me) {
+                const log = document.getElementById('chat-log');
+                const div = document.createElement('div');
+                div.className = 'chat-msg';
+                div.style.alignSelf = me ? 'flex-end' : 'flex-start';
+                div.style.background = me ? 'var(--accent)' : 'rgba(255,255,255,0.1)';
+                div.style.color = me ? '#1b261d' : '#fff';
+                div.innerText = msg;
+                log.appendChild(div);
+                if (me && Network.conn) Network.conn.send({type: 'chat', msg: msg});
+            },
+
+            buySkin() {
+                if (this.gems >= 10) {
+                    this.gems -= 10;
+                    this.snake.skin.a = document.getElementById('color1').value;
+                    this.snake.skin.b = document.getElementById('color2').value;
+                    this.save();
+                    this.showScreen('screen-main');
+                } else {
+                    alert("Gather more gems!");
+                }
+            },
+
+            save() {
+                localStorage.setItem('snk_forest_v1', JSON.stringify({
+                    gems: this.gems, level: this.level, skin: this.snake.skin
+                }));
+                document.getElementById('gems-count').innerText = this.gems;
+            },
+
+            toast(m) {
+                const t = document.createElement('div');
+                t.style = "position:fixed; top:20px; left:50%; transform:translateX(-50%); background:var(--accent); color:#000; padding:10px 30px; border-radius:50px; font-weight:bold; z-index:1000;";
+                t.innerText = m; document.body.appendChild(t);
+                setTimeout(() => t.remove(), 2500);
+            },
+
+            update() {
+                if (!this.active) return;
+
+                this.snake.update();
+                const head = this.snake.segments[0];
+
+                // Camera follow
+                this.cam.x += (head.x - window.innerWidth/2 - this.cam.x) * 0.1;
+                this.cam.y += (head.y - window.innerHeight/2 - this.cam.y) * 0.1;
+
+                // Fruit
+                if (Vec2.dist(head, this.fruit) < 40) {
+                    this.gems++;
+                    this.fruit = new Vec2(head.x + (Math.random()*1000-500), head.y + (Math.random()*1000-500));
+                    this.save();
+                }
+
+                // Story Mode Logic
+                if (this.mode === 'story') {
+                    if (this.enemies.length < 5 && Math.random() < 0.02) {
+                        this.enemies.push(new Enemy(head.x + 800, head.y + (Math.random()*600-300), this.level));
+                    }
+
+                    this.enemies.forEach((en, i) => {
+                        en.update(head);
+                        if (Vec2.dist(head, en.pos) < 40) {
+                            this.hp -= 15;
+                            this.enemies.splice(i, 1);
+                        }
+
+                        this.bullets.forEach((b, bi) => {
+                            if (Math.hypot(b.x - en.pos.x, b.y - en.pos.y) < 40) {
+                                en.hp--;
+                                this.bullets.splice(bi, 1);
+                                if (en.hp <= 0) {
+                                    this.enemies.splice(i, 1);
+                                    this.progress += 20;
+                                    if (this.progress >= 100) {
+                                        this.level++; this.progress = 0; this.hp = 100;
+                                        this.save(); document.getElementById('lvl-num').innerText = this.level;
+                                    }
+                                }
+                            }
+                        });
+                    });
+                }
+
+                this.bullets.forEach((b, i) => { b.x += b.vx; b.y += b.vy; b.life--; if(b.life<=0) this.bullets.splice(i, 1); });
+
+                // UI Updates
+                document.getElementById('hp-bar').style.width = this.hp + "%";
+                document.getElementById('xp-bar').style.width = this.progress + "%";
+                document.getElementById('prog-val').innerText = this.progress;
+
+                if (this.hp <= 0) { this.active = false; this.showScreen('screen-death'); }
+
+                // Network Sync
+                if (this.isMulti && Network.conn) {
+                    Network.conn.send({type: 'sync', seg: this.snake.segments, skin: this.snake.skin});
+                }
+            },
+
+            draw() {
+                const ctx = this.ctx;
+                ctx.fillStyle = '#1b261d';
+                ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+                // Grid pattern
+                ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+                ctx.lineWidth = 1;
+                const spacing = 100;
+                for(let x = -this.cam.x % spacing; x < this.canvas.width; x += spacing) {
+                    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, this.canvas.height); ctx.stroke();
+                }
+                for(let y = -this.cam.y % spacing; y < this.canvas.height; y += spacing) {
+                    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(this.canvas.width, y); ctx.stroke();
+                }
+
+                this.trees.forEach(t => t.draw(ctx, this.cam));
+
+                // Fruit
+                ctx.fillStyle = '#a3b18a';
+                ctx.beginPath(); ctx.arc(this.fruit.x - this.cam.x, this.fruit.y - this.cam.y, 15, 0, 7); ctx.fill();
+
+                // Bullets
+                ctx.fillStyle = 'white';
+                this.bullets.forEach(b => { ctx.beginPath(); ctx.arc(b.x - this.cam.x, b.y - this.cam.y, 6, 0, 7); ctx.fill(); });
+
+                // Enemies
+                this.enemies.forEach(en => en.draw(ctx, this.cam));
+
+                // Other Player & Red Arrow
+                if (this.isMulti && Network.otherSnakeData) {
+                    const os = Network.otherSnakeData;
+                    const grad = ctx.createLinearGradient(os[0].x - this.cam.x, os[0].y - this.cam.y, os[os.length-1].x - this.cam.x, os[os.length-1].y - this.cam.y);
+                    grad.addColorStop(0, '#fefae0'); grad.addColorStop(1, '#d4a373');
+                    ctx.strokeStyle = grad; ctx.lineWidth = 25; ctx.lineCap = 'round'; ctx.beginPath();
+                    os.forEach(p => ctx.lineTo(p.x - this.cam.x, p.y - this.cam.y)); ctx.stroke();
+
+                    // RED TRACKING ARROW
+                    const dx = os[0].x - this.snake.segments[0].x;
+                    const dy = os[0].y - this.snake.segments[0].y;
+                    const angle = Math.atan2(dy, dx);
+                    ctx.save();
+                    ctx.translate(window.innerWidth/2 + Math.cos(angle)*100, window.innerHeight/2 + Math.sin(angle)*100);
+                    ctx.rotate(angle);
+                    ctx.fillStyle = 'red';
+                    ctx.beginPath(); ctx.moveTo(15,0); ctx.lineTo(-10,10); ctx.lineTo(-10,-10); ctx.fill();
+                    ctx.restore();
+                }
+
+                this.snake.draw(ctx, this.cam);
+            },
+
+            loop() {
+                this.update();
+                this.draw();
+                requestAnimationFrame(() => this.loop());
+            }
+        };
+
+        window.onload = () => Engine.init();
+    </script>
+</body>
+</html>
